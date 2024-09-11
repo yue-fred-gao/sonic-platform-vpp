@@ -15,9 +15,7 @@
 SHELL = /bin/bash
 .SHELLFLAGS += -e
 
-VPP_URL = https://gerrit.fd.io/r/vpp
-VPP_SHA =
-VPP_LAG = 21
+VPP_URL = https://github.com/abdbaig/vpp.git
 USER = $(shell id -un)
 UID = $(shell id -u)
 GUID = $(shell id -g)
@@ -69,8 +67,7 @@ repo_clone:
 	rm -rf $(VPP_REPO_DIR)
 	git clone $(VPP_URL) $(VPP_REPO_DIR)
 	pushd $(VPP_REPO_DIR)
-	@VPP_SHA=`git log --until "$(VPP_LAG) days ago" -1 --format="%h"`
-	git checkout $$VPP_SHA
+	git checkout 21_days_old
 	# 1. use installed libnl from sonic. 
 	# 2. use libbpf pulled by vpp
 	git apply ../vpp.patch
