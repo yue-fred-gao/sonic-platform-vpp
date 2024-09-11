@@ -22,6 +22,7 @@ sonic_repo: build/.sonic_vpp_repo
 
 build/.sonic_vpp_setup:
 	./sonic-vpp-setup.sh && touch build/.sonic_vpp_setup
+	git apply ./patches/aclorch_support_tunterm.diff
 
 sonic_setup: build/.sonic_vpp_setup
 
