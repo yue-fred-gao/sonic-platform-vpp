@@ -416,6 +416,7 @@ sai_status_t SwitchStateBase::tunterm_set_action_redirect(
     sai_object_id_t              port_oid;
     sai_ip_address_t             ip_address;
     uint32_t                     next_hop_type;
+    uint16_t                     vlan_id = 0;
 
     next_hop_oid = value->aclaction.parameter.oid;
 
@@ -453,8 +454,14 @@ sai_status_t SwitchStateBase::tunterm_set_action_redirect(
         return SAI_STATUS_SUCCESS;
     }
 
+    attr.id = SAI_ROUTER_INTERFACE_ATTR_OUTER_VLAN_ID;
+    if (get(SAI_OBJECT_TYPE_ROUTER_INTERFACE, rif_oid, 1, &attr) == SAI_STATUS_SUCCESS)
+    {
+        vlan_id = attr.value.u16;
+    }
+
     std::string hwif_name;
-	if (!vpp_get_hwif_name(port_oid, 0, hwif_name)) {
+	if (!vpp_get_hwif_name(port_oid, vlan_id, hwif_name)) {
 	    SWSS_LOG_WARN("VPP hwif name not found for port %s", sai_serialize_object_id(port_oid).c_str());
         return SAI_STATUS_SUCCESS;
 	}
@@ -527,9 +534,9 @@ sai_status_t SwitchStateBase::tunterm_acl_rule_field_update(
         struct sockaddr_in *sin =  &ip_addr->addr.ip4;
         ip_addr->sa_family = AF_INET;
         sin->sin_addr.s_addr = value->aclfield.data.ip4;
+        SWSS_LOG_NOTICE("Tunterm acl rule has dst IP: %x", sin->sin_addr.s_addr);
         sin =  &ip_mask->addr.ip4;
         sin->sin_addr.s_addr = value->aclfield.mask.ip4;
-        SWSS_LOG_NOTICE("Tunterm acl rule has dst IP: %x", sin->sin_addr.s_addr);
         break;
     }
     case SAI_ACL_ENTRY_ATTR_FIELD_SRC_IPV6:
