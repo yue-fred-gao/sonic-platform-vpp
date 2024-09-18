@@ -1,0 +1,92 @@
+diff --git a/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.cpp b/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.cpp
+index 0cf2912..62f55d5 100644
+--- a/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.cpp
++++ b/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.cpp
+@@ -75,7 +75,8 @@ acl_rule_attr_lookup_t aclMatchLookup =
+     { MATCH_INNER_L4_SRC_PORT, SAI_ACL_ENTRY_ATTR_FIELD_INNER_L4_SRC_PORT },
+     { MATCH_INNER_L4_DST_PORT, SAI_ACL_ENTRY_ATTR_FIELD_INNER_L4_DST_PORT },
+     { MATCH_BTH_OPCODE,        SAI_ACL_ENTRY_ATTR_FIELD_BTH_OPCODE},
+-    { MATCH_AETH_SYNDROME,     SAI_ACL_ENTRY_ATTR_FIELD_AETH_SYNDROME}
++    { MATCH_AETH_SYNDROME,     SAI_ACL_ENTRY_ATTR_FIELD_AETH_SYNDROME},
++    { MATCH_TUNNEL_TERMINATED, SAI_ACL_ENTRY_ATTR_FIELD_TUNNEL_TERMINATED}
+ };
+ 
+ static acl_range_type_lookup_t aclRangeTypeLookup =
+@@ -1050,6 +1051,15 @@ bool AclRule::validateAddMatch(string attr_name, string attr_value)
+                 SWSS_LOG_ERROR("Invalid AETH_SYNDROME configuration: %s, expected format <data>/<mask>", attr_value.c_str());
+                 return false;
+             }
++        }
++        else if (attr_name == MATCH_TUNNEL_TERMINATED)
++        {
++            if (attr_value == "true" || attr_value == "TRUE") {
++                matchData.data.booldata = true;
++            } else {
++                matchData.data.booldata = false;
++            }
++            matchData.mask.u8 = 0xFF;
+         }
+     }
+     catch (exception &e)
+@@ -3248,6 +3258,7 @@ void AclOrch::initDefaultTableTypes(const string& platform, const string& sub_pl
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_L4_SRC_PORT))
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT))
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_TCP_FLAGS))
++            .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_TUNNEL_TERMINATED))
+             .build()
+     );
+ 
+@@ -3265,6 +3276,7 @@ void AclOrch::initDefaultTableTypes(const string& platform, const string& sub_pl
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_L4_SRC_PORT))
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT))
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_TCP_FLAGS))
++            .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_TUNNEL_TERMINATED))
+             .build()
+     );
+ 
+@@ -3290,6 +3302,7 @@ void AclOrch::initDefaultTableTypes(const string& platform, const string& sub_pl
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_L4_DST_PORT))
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_TCP_FLAGS))
+             .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_IN_PORTS))
++            .withMatch(make_shared<AclTableMatch>(SAI_ACL_TABLE_ATTR_FIELD_TUNNEL_TERMINATED))
+             .build()
+     );
+ 
+@@ -4487,6 +4500,11 @@ void AclOrch::doAclTableTask(Consumer &consumer)
+                     // TODO: validate control plane ACL table has this attribute
+                     continue;
+                 }
++                else if (attr_name == ACL_TABLE_TUNNEL_TERMINATED)
++                {
++                    // TODO: validate control plane ACL table has this attribute
++                    continue;
++                }
+                 else
+                 {
+                     SWSS_LOG_ERROR("Unknown table attribute '%s'", attr_name.c_str());
+
+diff --git a/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.h b/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.h
+index 5458e97..0bde7a1 100644
+--- a/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.h
++++ b/build/sonic-buildimage/src/sonic-swss/orchagent/aclorch.h
+@@ -52,6 +52,7 @@
+ #define MATCH_INNER_L4_DST_PORT "INNER_L4_DST_PORT"
+ #define MATCH_BTH_OPCODE        "BTH_OPCODE"
+ #define MATCH_AETH_SYNDROME     "AETH_SYNDROME"
++#define MATCH_TUNNEL_TERMINATED "TUNNEL_TERMINATED"
+ 
+ #define BIND_POINT_TYPE_PORT "PORT"
+ #define BIND_POINT_TYPE_PORTCHANNEL "PORTCHANNEL"
+
+diff --git a/build/sonic-buildimage/src/sonic-swss/orchagent/acltable.h b/build/sonic-buildimage/src/sonic-swss/orchagent/acltable.h
+index 1b1cdeb..b9e1ca6 100644
+--- a/build/sonic-buildimage/src/sonic-swss/orchagent/acltable.h
++++ b/build/sonic-buildimage/src/sonic-swss/orchagent/acltable.h
+@@ -14,6 +14,7 @@ extern "C" {
+ #define ACL_TABLE_TYPE         "TYPE"
+ #define ACL_TABLE_PORTS        "PORTS"
+ #define ACL_TABLE_SERVICES     "SERVICES"
++#define ACL_TABLE_TUNNEL_TERMINATED "TUNNEL_TERMINATED"
+ 
+ #define ACL_TABLE_TYPE_MATCHES      "MATCHES"
+ #define ACL_TABLE_TYPE_BPOINT_TYPES "BIND_POINTS"

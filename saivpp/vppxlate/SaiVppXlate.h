@@ -81,6 +81,21 @@ extern "C" {
         vpp_acl_rule_t rules[0];
     } vpp_acl_t;
 
+    typedef struct {
+        vpp_ip_addr_t dst_prefix;
+        vpp_ip_addr_t dst_prefix_mask;
+        char hwif_name[64];
+        uint8_t  ip_protocol;
+        vpp_ip_addr_t next_hop_ip;
+    } tunterm_acl_rule_t;
+
+    typedef struct _vpp_tunterm_acl_ {
+        char *acl_name;
+        uint32_t count;
+        tunterm_acl_rule_t rules[0];
+    } vpp_tunerm_acl_t;
+
+
     typedef enum {
         VPP_IP_API_FLOW_HASH_SRC_IP = 1,
         VPP_IP_API_FLOW_HASH_DST_IP = 2,
@@ -92,17 +107,34 @@ extern "C" {
         VPP_IP_API_FLOW_HASH_FLOW_LABEL = 128,
     } vpp_ip_flow_hash_mask_e;
 
+    typedef enum {
+        VPP_API_BFD_STATE_ADMIN_DOWN = 0,
+        VPP_API_BFD_STATE_DOWN = 1,
+        VPP_API_BFD_STATE_INIT = 2,
+        VPP_API_BFD_STATE_UP = 3,
+    } vpp_api_bfd_state_e;
+
     typedef struct vpp_intf_status_ {
 	char hwif_name[64];
 	bool link_up;
     } vpp_intf_status_t;
 
+    typedef struct vpp_bfd_state_notif_ {
+        bool                multihop;
+        uint32_t            sw_if_index;
+        vpp_ip_addr_t       local_addr;
+        vpp_ip_addr_t       peer_addr;
+        vpp_api_bfd_state_e state;
+    } vpp_bfd_state_notif_t;
+
     typedef enum {
 	VPP_INTF_LINK_STATUS = 1,
+        VPP_BFD_STATE_CHANGE,
     } vpp_event_type_e;
 
     typedef union vpp_event_data_ {
-	vpp_intf_status_t intf_status;
+       vpp_intf_status_t     intf_status;
+       vpp_bfd_state_notif_t bfd_notif;
     } vpp_event_data_t;
 
     typedef struct vpp_event_info_ {
@@ -186,7 +218,7 @@ typedef enum {
     extern int interface_set_state (const char *hwif_name, bool is_up);
     extern int hw_interface_set_mtu(const char *hwif_name, uint32_t mtu);
     extern int sw_interface_set_mtu(const char *hwif_name, uint32_t mtu, int type);
-
+    extern int sw_interface_set_mac(const char *hwif_name, uint8_t *mac_address);
     extern int ip_vrf_add(uint32_t vrf_id, const char *vrf_name, bool is_ipv6);
     extern int ip_vrf_del(uint32_t vrf_id, const char *vrf_name, bool is_ipv6);
 
@@ -199,6 +231,10 @@ typedef enum {
 
     extern int vpp_acl_add_replace(vpp_acl_t *in_acl, uint32_t *acl_index, bool is_replace);
     extern int vpp_acl_del(uint32_t acl_index);
+    extern int vpp_tunterm_acl_interface_add_del (uint32_t tunterm_index,
+                                           bool is_bind, const char *hwif_name);
+    extern int vpp_tunterm_acl_del (uint32_t tunterm_index);
+    extern int vpp_tunterm_acl_add_replace (uint32_t *tunterm_index, uint32_t count, vpp_tunerm_acl_t *acl);
     extern int vpp_acl_interface_bind(const char *hwif_name, uint32_t acl_index,
 				      bool is_input);
     extern int vpp_acl_interface_unbind(const char *hwif_name, uint32_t acl_index,
@@ -217,9 +253,11 @@ typedef enum {
     extern int l2fib_flush_all();
     extern int l2fib_flush_int(const char *hwif_name);
     extern int l2fib_flush_bd(uint32_t bd_id);
-    extern int bfd_udp_add(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t *peer_addr, uint8_t detect_mult,\
+    extern int bfd_udp_add(bool multihop, const char *hwif_name, vpp_ip_addr_t *local_addr,
+                           vpp_ip_addr_t *peer_addr, uint8_t detect_mult,
                            uint32_t desired_min_tx, uint32_t required_min_rx);
-    extern int bfd_udp_del(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t *peer_addr);
+    extern int bfd_udp_del(bool multihop, const char *hwif_name, vpp_ip_addr_t *local_addr,
+                           vpp_ip_addr_t *peer_addr);
 
     extern int vpp_vxlan_tunnel_add_del(vpp_vxlan_tunnel_t *tunnel, bool is_add,  uint32_t *sw_if_index);
     extern int vpp_ip_addr_t_to_string(vpp_ip_addr_t *ip_addr, char *buffer, size_t maxlen);

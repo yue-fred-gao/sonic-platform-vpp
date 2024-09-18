@@ -28,6 +28,7 @@
 #include "SaiObjectDB.h"
 #include "BitResourcePool.h"
 #include "TunnelManager.h"
+#include "vppxlate/SaiVppXlate.h"
 
 #include <set>
 #include <unordered_set>
@@ -35,6 +36,8 @@
 #include <list>
 
 #include "SwitchStateBaseNexthop.h"
+
+#define BFD_MUTEX std::lock_guard<std::mutex> lock(bfdMapMutex);
 
 #define SAI_VPP_FDB_INFO "SAI_VPP_FDB_INFO"
 
@@ -52,7 +55,9 @@
         snprintf(buffer, 512, msg, ##__VA_ARGS__); \
         SWSS_LOG_ERROR("%s: status %d", buffer, status); \
         return _status; } }
-
+#define CHECK_STATUS_QUIET(status) {                                  \
+    sai_status_t _status = (status);                            \
+    if (_status != SAI_STATUS_SUCCESS) { return _status; } }
 typedef struct vpp_ace_cntr_info_ {
     sai_object_id_t tbl_oid;
     sai_object_id_t ace_oid;
@@ -211,7 +216,47 @@ namespace saivpp
             sai_status_t vpp_bfd_session_del(
                     _In_ const std::string &serializedObjectId);
 
+        private: // BFD related
+            struct vpp_bfd_info_t {
+                //uint32_t sw_if_index;
+                bool multihop;
+                sai_ip_address_t local_addr;
+                sai_ip_address_t peer_addr;
+            
+                // Define the < operator for comparison
+                bool operator<(const vpp_bfd_info_t& other) const {
+            
+                    // compare local IP address first
+                    int cmp = std::memcmp(&local_addr, &other.local_addr, sizeof(sai_ip_address_t));
+                    if (cmp != 0) {
+                        return cmp < 0;
+                    }
+            
+                    // compare peer IP address
+                    cmp = std::memcmp(&peer_addr, &other.peer_addr, sizeof(sai_ip_address_t));
+                    if (cmp != 0) {
+                        return cmp < 0;
+                    }
+            
+                    // compare multihop flag
+                    return multihop < other.multihop;
+                }
+            };
 
+            std::map<vpp_bfd_info_t, sai_object_id_t> m_bfd_info_map;
+            std::mutex bfdMapMutex;
+
+            void send_bfd_state_change_notification(
+                    _In_ sai_object_id_t bfd_oid,
+                    _In_ sai_bfd_session_state_t state,
+                    _In_ bool force);
+
+            void update_bfd_session_state(
+                    _In_ sai_object_id_t bfd_oid,
+                    _In_ sai_bfd_session_state_t state);
+
+            sai_status_t asyncBfdStateUpdate(vpp_bfd_state_notif_t *bfd_notif);
+ 
         protected:
 
             virtual sai_status_t create_port_dependencies(
@@ -390,7 +435,7 @@ namespace saivpp
                               _In_ sai_attr_id_t attr_id,
                              _Inout_ sai_s32_list_t *enum_values_capability);
 
-            std::shared_ptr<SaiObject> get_sai_object(
+            std::shared_ptr<SaiDBObject> get_sai_object(
                     _In_ sai_object_type_t object_type,
                     _In_ const std::string &serialized_object_id);
         protected:
@@ -782,21 +827,12 @@ namespace saivpp
 	    std::unordered_map<std::string, std::string> lpbIpToHostIfMap;
 	    std::unordered_map<std::string, std::string> lpbIpToIfMap;
             std::unordered_map<std::string, std::string> lpbHostIfToVppIfMap;
-
-            std::map<sai_object_id_t, std::list<sai_object_id_t>> m_nxthop_grp_mbr_map;
-
         protected:
-            sai_status_t NexthopGrpRemove(
-                _In_ const std::string &serializedObjectId);
-
-            sai_status_t NexthopGrpMemberRemove(
-                _In_ const std::string &serializedObjectId);
-
-            sai_status_t NexthopGrpMemberAdd(
-                _In_ const std::string &serializedObjectId,
-                _In_ sai_object_id_t switch_id,
-                _In_ uint32_t attr_count,
-                _In_ const sai_attribute_t *attr_list);
+            sai_status_t fillNHGrpMember(
+                nexthop_grp_member_t *nxt_grp_member, 
+                sai_object_id_t next_hop_oid, 
+                uint32_t next_hop_weight, 
+                uint32_t next_hop_sequence);
 
             sai_status_t IpRouteNexthopGroupEntry(
                 _In_ sai_object_id_t next_hop_grp_oid,
@@ -956,7 +992,9 @@ namespace saivpp
 
         private:
             std::map<sai_object_id_t, std::list<sai_object_id_t>> m_acl_tbl_rules_map;
+            std::map<sai_object_id_t, std::list<std::string>> m_acl_tbl_hw_ports_map;
 	    std::map<sai_object_id_t, uint32_t> m_acl_swindex_map;
+            std::map<sai_object_id_t, uint32_t> m_tunterm_acl_swindex_map;
             std::map<sai_object_id_t, std::list<sai_object_id_t>> m_acl_tbl_grp_mbr_map;
             std::map<sai_object_id_t, std::list<sai_object_id_t>> m_acl_tbl_grp_ports_map;
 	    std::map<sai_object_id_t, vpp_ace_cntr_info_t> m_ace_cntr_info_map;
@@ -980,6 +1018,12 @@ namespace saivpp
 		_In_ sai_object_id_t tbl_oid,
 		_In_ bool is_add);
 
+            sai_status_t tbl_hw_ports_map_delete(
+                _In_ sai_object_id_t tbl_oid);
+        
+            sai_status_t tunterm_acl_delete(
+                _In_ sai_object_id_t tbl_oid);
+
 	    sai_status_t getAclTableId(
 		_In_ sai_object_id_t entry_id, sai_object_id_t *tbl_oid);
 
@@ -994,6 +1038,20 @@ namespace saivpp
 
             sai_status_t aclTableRemove(
 		_In_ const std::string &serializedObjectId);
+        
+            sai_status_t tunterm_acl_add_replace(
+                _In_ vpp_tunerm_acl_t *acl,
+                _In_ sai_object_id_t tbl_oid);
+
+            sai_status_t tunterm_set_action_redirect(
+                _In_ sai_acl_entry_attr_t          attr_id,
+                _In_ const sai_attribute_value_t  *value,
+                _Out_ tunterm_acl_rule_t      *rule);
+           
+           sai_status_t tunterm_acl_rule_field_update(
+                _In_ sai_acl_entry_attr_t          attr_id,
+                _In_ const sai_attribute_value_t  *value,
+                _Out_ tunterm_acl_rule_t      *rule);
 
 	    sai_status_t aclTableCreate(
 		_In_ sai_object_id_t object_id,
@@ -1056,6 +1114,11 @@ namespace saivpp
 	       _In_ sai_object_id_t tbl_oid,
 	       _In_ bool is_bind);
 
+           sai_status_t tunterm_acl_bindunbind(
+               _In_ sai_object_id_t tbl_oid,
+               _In_ bool is_add,
+               _In_ std::string hwif_name);
+
 	   sai_status_t getAclEntryStats(
 	       _In_ sai_object_id_t ace_cntr_oid,
 	       _In_ uint32_t attr_count,
@@ -1073,7 +1136,6 @@ namespace saivpp
 	       _Out_ std::string& ifname);
 
         protected:
-            bool is_sonic_vpp_switch ();
 	    void populate_if_mapping();
 	    const char *tap_to_hwif_name(const char *name);
             const char *hwif_to_tap_name(const char *name);
@@ -1085,8 +1147,6 @@ namespace saivpp
 	    std::map<std::string, std::string> m_hostif_hwif_map;
 	    std::map<std::string, std::string> m_hwif_hostif_map;
 	    int mapping_init = 0;
-            bool vpp_switch_env_read = false;
-            bool sonic_vpp_switch = false;
             bool m_run_vpp_events_thread = true;
             bool VppEventsThreadStarted = false;
 	    std::shared_ptr<std::thread> m_vpp_thread;

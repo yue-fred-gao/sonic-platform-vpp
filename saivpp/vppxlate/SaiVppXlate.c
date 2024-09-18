@@ -47,6 +47,9 @@
 #include <vpp_plugins/acl/acl.api_enum.h>
 #include <vpp_plugins/acl/acl.api_types.h>
 
+#include <vpp_plugins/tunterm_acl/tunterm_acl.api_enum.h>
+#include <vpp_plugins/tunterm_acl/tunterm_acl.api_types.h>
+
 #include <vlibmemory/vlib.api_types.h>
 #include <vlibmemory/memclnt.api_enum.h>
 
@@ -79,6 +82,24 @@
 
 #define vl_api_version(n, v) static u32 l2_api_version = v;
 #include <vnet/l2/l2.api.h>
+#undef vl_api_version
+
+/* tunterm API inclusion */
+
+#define vl_typedefs
+#include <vpp_plugins/tunterm_acl/tunterm_acl.api.h>
+#undef vl_typedefs
+
+#define  vl_endianfun
+#include <vpp_plugins/tunterm_acl/tunterm_acl.api.h>
+#undef vl_endianfun
+
+#define vl_calcsizefun
+#include <vpp_plugins/tunterm_acl/tunterm_acl.api.h>
+#undef vl_calcsizefun
+
+#define vl_api_version(n, v) static u32 tunterm_api_version = v;
+#include <vpp_plugins/tunterm_acl/tunterm_acl.api.h>
 #undef vl_api_version
 
 /* interface API inclusion */
@@ -335,6 +356,7 @@ static void vpp_evq_init ()
 
 static int vpp_acl_counters_enable_disable(bool enable);
 static int vpp_intf_events_enable_disable(bool enable);
+static int vpp_bfd_events_enable_disable(bool enable);
 
 static pthread_mutex_t vpp_mutex;
 
@@ -437,6 +459,51 @@ vl_msg_api_set_handlers (int id, char *name, void *handler, void *cleanup,
     c->fromjson = fromjson;
     c->calc_size = calc_size;
     vl_msg_api_config (c);
+}
+
+static bool vl_api_to_vpp_ip_addr(vl_api_address_t *vpp_addr, vpp_ip_addr_t *ipaddr)
+{
+    bool ret = true;
+    if (vpp_addr->af == ADDRESS_IP4)
+    {
+        ipaddr->sa_family = AF_INET;
+        struct sockaddr_in *ip4 = &(ipaddr->addr.ip4);
+        memcpy(&(ip4->sin_addr.s_addr), &vpp_addr->un.ip4, sizeof(ip4->sin_addr.s_addr));
+
+    }
+    else if (vpp_addr->af == ADDRESS_IP6)
+    {
+        ipaddr->sa_family = AF_INET6;
+        struct sockaddr_in6 *ip6 = &(ipaddr->addr.ip6);
+        memcpy(&(ip6->sin6_addr.s6_addr), &vpp_addr->un.ip6, sizeof(ip6->sin6_addr.s6_addr));
+    }
+    else
+    {
+        return false;
+    }
+    return ret;
+}
+
+static bool vpp_to_vl_api_ip_addr(vl_api_address_t *vpp_addr, vpp_ip_addr_t *ipaddr)
+{
+    bool ret = true;
+    if (ipaddr->sa_family == AF_INET)
+    {
+        struct sockaddr_in *ip4 = &(ipaddr->addr.ip4);
+        vpp_addr->af = ADDRESS_IP4;
+        memcpy(&vpp_addr->un.ip4, &ip4->sin_addr.s_addr, sizeof(vpp_addr->un.ip4));
+    }
+    else if (ipaddr->sa_family == AF_INET6)
+    {
+        struct sockaddr_in6 *ip6 = &(ipaddr->addr.ip6);
+        vpp_addr->af = ADDRESS_IP6;
+        memcpy(&vpp_addr->un.ip6, &ip6->sin6_addr.s6_addr, sizeof(vpp_addr->un.ip6));
+    }
+    else
+    {
+        return false;
+    }
+    return ret;
 }
 
 void
@@ -635,7 +702,13 @@ vl_api_sw_interface_set_mtu_reply_t_handler (vl_api_sw_interface_set_mtu_reply_t
 
     SAIVPP_DEBUG("sw interface mtu set %s(%d)", msg->retval ? "failed" : "successful", msg->retval);
 }
+static void
+vl_api_sw_interface_set_mac_address_reply_t_handler (vl_api_sw_interface_set_mac_address_reply_t *msg)
+{
+    set_reply_status(ntohl(msg->retval));
 
+    SAIVPP_DEBUG("sw interface mac set %s(%d)", msg->retval ? "failed" : "successful", msg->retval);
+}
 static void
 vl_api_hw_interface_set_mtu_reply_t_handler (vl_api_hw_interface_set_mtu_reply_t *msg)
 {
@@ -766,23 +839,69 @@ vl_api_l2fib_flush_bd_reply_t_handler (vl_api_l2fib_flush_bd_reply_t *msg)
 }
 
 static void
-vl_api_bfd_udp_add_reply_t_handler (vl_api_bfd_udp_add_reply_t *msg)
+vl_api_bfd_udp_add_v2_reply_t_handler (vl_api_bfd_udp_add_v2_reply_t *msg)
 {
     set_reply_status(ntohl(msg->retval));
 
     SAIVPP_DEBUG("bfd udp add reply handler  %s(%d)", msg->retval ? "failed" : "successful", msg->retval);
-    //SAIVPP_ERROR("bfd udp add reply handler %s(%d)",msg->retval ? "failed" : "successful", msg->retval);
 
 }
 
 static void
-vl_api_bfd_udp_del_reply_t_handler (vl_api_bfd_udp_del_reply_t *msg)
+vl_api_bfd_udp_del_v2_reply_t_handler (vl_api_bfd_udp_del_v2_reply_t *msg)
 {
     set_reply_status(ntohl(msg->retval));
 
     SAIVPP_DEBUG("bfd udp del reply handler  %s(%d)", msg->retval ? "failed" : "successful", msg->retval);
-    //SAIVPP_ERROR("bfd udp del reply handler %s(%d)",msg->retval ? "failed" : "successful", msg->retval);
 
+}
+
+static void
+vl_api_want_bfd_events_v2_reply_t_handler (vl_api_want_bfd_events_v2_reply_t *msg)
+{
+    set_reply_status(ntohl(msg->retval));
+
+    SAIVPP_DEBUG("bfd events enable %s(%d)", msg->retval ? "failed" : "successful", msg->retval);
+}
+
+static void
+vl_api_bfd_udp_session_event_v2_t_handler (vl_api_bfd_udp_session_event_v2_t *msg)
+{
+
+    SAIVPP_WARN("Sending bfd state change event, multihop: %d, sw_if_index: %d, "
+                "state: %d ",
+                msg->multihop, htonl(msg->sw_if_index), htonl(msg->state));
+
+    vpp_event_info_t *evinfo;
+    evinfo = calloc(1, sizeof(*evinfo));
+
+    vpp_ip_addr_t vpp_local_addr, vpp_peer_addr;
+    memset(&vpp_local_addr, 0, sizeof(vl_api_address_t));
+    memset(&vpp_peer_addr, 0, sizeof(vl_api_address_t));
+
+    if (evinfo) {
+       evinfo->type = VPP_BFD_STATE_CHANGE;
+       vpp_bfd_state_notif_t *bfd_notif = &evinfo->data.bfd_notif;
+
+       bfd_notif->multihop = msg->multihop;
+       bfd_notif->sw_if_index = htonl(msg->sw_if_index);
+       bfd_notif->state = htonl(msg->state);
+
+        if(!((true == vl_api_to_vpp_ip_addr(&msg->local_addr, &bfd_notif->local_addr)) && \
+             (true == vl_api_to_vpp_ip_addr(&msg->peer_addr, &bfd_notif->peer_addr))))
+        {
+            SAIVPP_WARN("Invalid IP address passed from vpp for bfd event");
+            return;
+        }
+        
+       vpp_ev_enqueue(evinfo);
+    }
+
+    set_reply_status(0);
+
+    SAIVPP_DEBUG("BFD udp session event, multihop: %d, sw_if_index: %d, "
+                "state: %d ",
+                msg->multihop, htonl(msg->sw_if_index), htonl(msg->state));
 }
 
 static void
@@ -810,6 +929,36 @@ vl_api_vxlan_add_del_tunnel_v3_reply_t_handler (
     SAIVPP_DEBUG("vxlan_add_del handler: if_idx,%d,status,%d",vam->sw_if_index, vam->retval);
 }
 
+static void
+vl_api_tunterm_acl_add_replace_reply_t_handler(vl_api_tunterm_acl_add_replace_reply_t *msg)
+{
+    set_reply_status(ntohl(msg->retval));
+
+    uint32_t *tunterm_index = (uint32_t *) get_index_ptr(msg->context);
+    *tunterm_index = ntohl(msg->tunterm_acl_index);
+
+    SAIVPP_DEBUG("tunterm acl add_replace %s(%d) tunterm_index index %u", msg->retval ? "failed" : "successful",
+		 msg->retval, *tunterm_index);
+    release_index(msg->context);
+}
+
+static void
+vl_api_tunterm_acl_del_reply_t_handler(vl_api_tunterm_acl_del_reply_t *msg)
+{
+    set_reply_status(ntohl(msg->retval));
+
+    SAIVPP_DEBUG("tunterm acl del %s(%d)", msg->retval ? "failed" : "successful", msg->retval);
+}
+
+static void
+vl_api_tunterm_acl_interface_add_del_reply_t_handler(vl_api_tunterm_acl_interface_add_del_reply_t *msg)
+{
+    set_reply_status(ntohl(msg->retval));
+
+    SAIVPP_DEBUG("tunterm acl interface set/reset  %s(%d)", msg->retval ? "failed" : "successful",
+		 msg->retval);
+}
+
 #define vl_api_get_first_msg_id_reply_t_handler vl_noop_handler
 #define vl_api_get_first_msg_id_reply_t_handler_json vl_noop_handler
 
@@ -821,6 +970,7 @@ vl_api_vxlan_add_del_tunnel_v3_reply_t_handler (
 
 static u16 interface_msg_id_base, memclnt_msg_id_base, __plugin_msg_base;
 static u16 l2_msg_id_base, vxlan_msg_id_base;
+static u16 tunterm_msg_id_base;
 static u16 bfd_msg_id_base;
 
 static void vpp_base_vpe_init(void)
@@ -865,6 +1015,7 @@ static void vpp_base_vpe_init(void)
     _(INTERFACE_MSG_ID(SW_INTERFACE_ADD_DEL_ADDRESS_REPLY), sw_interface_add_del_address_reply) \
     _(INTERFACE_MSG_ID(SW_INTERFACE_SET_FLAGS_REPLY), sw_interface_set_flags_reply) \
     _(INTERFACE_MSG_ID(SW_INTERFACE_SET_MTU_REPLY), sw_interface_set_mtu_reply) \
+    _(INTERFACE_MSG_ID(SW_INTERFACE_SET_MAC_ADDRESS_REPLY), sw_interface_set_mac_address_reply) \ 
     _(INTERFACE_MSG_ID(HW_INTERFACE_SET_MTU_REPLY), hw_interface_set_mtu_reply) \
     _(INTERFACE_MSG_ID(WANT_INTERFACE_EVENTS), want_interface_events_reply) \
     _(INTERFACE_MSG_ID(SW_INTERFACE_EVENT), sw_interface_event) \
@@ -883,8 +1034,11 @@ static void vpp_base_vpe_init(void)
     _(L2_MSG_ID(L2FIB_FLUSH_ALL_REPLY), l2fib_flush_all_reply) \
     _(L2_MSG_ID(L2FIB_FLUSH_INT_REPLY), l2fib_flush_int_reply) \
     _(L2_MSG_ID(L2FIB_FLUSH_BD_REPLY), l2fib_flush_bd_reply) \
-    _(BFD_MSG_ID(BFD_UDP_ADD_REPLY), bfd_udp_add_reply) \
-    _(BFD_MSG_ID(BFD_UDP_DEL_REPLY), bfd_udp_del_reply) \
+    _(BFD_MSG_ID(BFD_UDP_ADD_V2_REPLY), bfd_udp_add_v2_reply) \
+    _(BFD_MSG_ID(BFD_UDP_DEL_V2_REPLY), bfd_udp_del_v2_reply) \
+    _(BFD_MSG_ID(BFD_UDP_SESSION_EVENT_V2), bfd_udp_session_event_v2) \
+    _(BFD_MSG_ID(WANT_BFD_EVENTS_V2), want_bfd_events_v2_reply) \
+
 
 static u16 interface_msg_id_base, ip_msg_id_base, ip_nbr_msg_id_base, lcp_msg_id_base, memclnt_msg_id_base, __plugin_msg_base;
 static u16 acl_msg_id_base;
@@ -955,6 +1109,9 @@ vl_api_acl_interface_add_del_reply_t_handler(vl_api_acl_interface_add_del_reply_
 #define ACL_MSG_ID(id) \
     (VL_API_##id + acl_msg_id_base)
 
+#define TUNTERM_MSG_ID(id) \
+    (VL_API_##id + tunterm_msg_id_base)
+
 #define VXLAN_MSG_ID(id) \
     (VL_API_##id + vxlan_msg_id_base)
 
@@ -964,7 +1121,10 @@ vl_api_acl_interface_add_del_reply_t_handler(vl_api_acl_interface_add_del_reply_
     _(ACL_MSG_ID(ACL_DEL_REPLY), acl_del_reply) \
     _(ACL_MSG_ID(ACL_STATS_INTF_COUNTERS_ENABLE_REPLY), acl_stats_intf_counters_enable_reply) \
     _(ACL_MSG_ID(ACL_INTERFACE_ADD_DEL_REPLY), acl_interface_add_del_reply) \
-    _(VXLAN_MSG_ID(VXLAN_ADD_DEL_TUNNEL_V3_REPLY), vxlan_add_del_tunnel_v3_reply)
+    _(VXLAN_MSG_ID(VXLAN_ADD_DEL_TUNNEL_V3_REPLY), vxlan_add_del_tunnel_v3_reply) \
+    _(TUNTERM_MSG_ID(TUNTERM_ACL_INTERFACE_ADD_DEL_REPLY), tunterm_acl_interface_add_del_reply) \
+    _(TUNTERM_MSG_ID(TUNTERM_ACL_DEL_REPLY), tunterm_acl_del_reply) \
+    _(TUNTERM_MSG_ID(TUNTERM_ACL_ADD_REPLACE_REPLY), tunterm_acl_add_replace_reply)
 static void vpp_plugin_vpe_init(void)
 {
 #define _(N,n)                                                  \
@@ -1019,6 +1179,10 @@ static void get_base_msg_id()
     msg_base_lookup_name = format (0, "vxlan_%08x%c", vxlan_api_version, 0);
     vxlan_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
     assert(vxlan_msg_id_base != (u16) ~0);
+
+    msg_base_lookup_name = format (0, "tunterm_acl_%08x%c", tunterm_api_version, 0);
+    tunterm_msg_id_base = vl_client_get_first_plugin_msg_id ((char *) msg_base_lookup_name);
+    assert(tunterm_msg_id_base != (u16) ~0);
 }
 
 #define API_SOCKET_FILE "/run/vpp/api.sock"
@@ -1359,6 +1523,10 @@ int init_vpp_client()
 	 * Revisit the async mechanism if there is greater reason.
 	 */
 	vpp_intf_events_enable_disable(true);
+
+        /* Register with VPP for BFD notifications */
+        vpp_bfd_events_enable_disable(true);
+
 
 	vpp_evq_init();
 	vpp_client_init = 1;
@@ -1821,6 +1989,148 @@ int vpp_acl_del (uint32_t acl_index)
     return ret;
 }
 
+int vpp_tunterm_acl_interface_add_del (uint32_t tunterm_index, bool is_bind, const char *hwif_name)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_tunterm_acl_interface_add_del_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = tunterm_msg_id_base;
+    M (TUNTERM_ACL_INTERFACE_ADD_DEL, mp);
+
+    if (hwif_name) {
+        u32 idx;
+
+        idx = get_swif_idx(vam, hwif_name);
+        if (idx != (u32) -1) {
+            mp->sw_if_index = htonl(idx);
+        } else {
+            SAIVPP_ERROR("Unable to get sw_index for %s\n", hwif_name);
+            VPP_UNLOCK();
+            return -EINVAL;
+        }
+    } else {
+        VPP_UNLOCK();
+        return -EINVAL;
+    }
+    mp->is_add = is_bind;
+    mp->tunterm_acl_index= htonl(tunterm_index);
+
+    S (mp);
+    W (ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+}
+
+
+int vpp_tunterm_acl_del (uint32_t tunterm_index)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_tunterm_acl_del_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = tunterm_msg_id_base;
+    M (TUNTERM_ACL_DEL, mp);
+
+    mp->tunterm_acl_index= htonl(tunterm_index);
+
+    S (mp);
+    W (ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+}
+
+int vpp_tunterm_acl_add_replace (uint32_t *tunterm_index, uint32_t count, vpp_tunerm_acl_t *in_acl)
+{
+    u32 idx;
+    vat_main_t *vam = &vat_main;
+    vpp_ip_addr_t *addr;
+    tunterm_acl_rule_t *in_rule;
+    vl_api_address_t *api_addr;
+    vl_api_tunterm_acl_rule_t *vpp_rule;
+    vl_api_tunterm_acl_add_replace_t *mp;
+    int ret;
+
+    init_vpp_client();
+
+    VPP_LOCK();
+
+    __plugin_msg_base = tunterm_msg_id_base;
+
+    M2 (TUNTERM_ACL_ADD_REPLACE, mp, count*sizeof(vl_api_tunterm_acl_rule_t));
+
+    mp->count = htonl(count);
+    mp->tunterm_acl_index = htonl(*tunterm_index);
+
+    for (idx = 0; idx < count; idx++) {
+        in_rule = &in_acl->rules[idx];
+        vpp_rule = &mp->r[idx];
+
+        addr = &in_rule->dst_prefix;
+        api_addr = &vpp_rule->dst;
+
+        if (addr->sa_family == AF_INET) {
+            struct sockaddr_in *ip4 = &addr->addr.ip4;
+            api_addr->af = ADDRESS_IP4;
+            memcpy(api_addr->un.ip4, &ip4->sin_addr.s_addr, sizeof(api_addr->un.ip4));
+            mp->is_ipv6 = false;
+        } else if (addr->sa_family == AF_INET6) {
+            struct sockaddr_in6 *ip6 =  &addr->addr.ip6;
+            api_addr->af = ADDRESS_IP6;
+            memcpy(api_addr->un.ip6, &ip6->sin6_addr.s6_addr, sizeof(api_addr->un.ip6));
+            mp->is_ipv6 = true;
+        } else {
+            SAIVPP_WARN("Unknown protocol in destination prefix");
+            // return -EINVAL;
+        }
+
+        if (in_rule->hwif_name) {
+            u32 idx;
+            idx = get_swif_idx(vam, in_rule->hwif_name);
+            if (idx != (u32) -1) {
+                vpp_rule->path.sw_if_index = htonl(idx);
+            } else {
+                SAIVPP_ERROR("Unable to get sw_index for %s\n", in_rule->hwif_name);
+                VPP_UNLOCK();
+                return -EINVAL;
+            }
+        } else {
+            SAIVPP_ERROR("No hwif_name provided.\n");
+            VPP_UNLOCK();
+            return -EINVAL;
+        }
+
+        if(in_rule->ip_protocol == 1) {
+            vpp_rule->path.proto = htonl(FIB_API_PATH_NH_PROTO_IP4);
+            memcpy(vpp_rule->path.nh.address.ip4, &in_rule->next_hop_ip.addr.ip4.sin_addr.s_addr, sizeof(vpp_rule->path.nh.address.ip4)); 
+        } else if (in_rule->ip_protocol == 2) {
+            vpp_rule->path.proto  = htonl(FIB_API_PATH_NH_PROTO_IP6);
+            memcpy(vpp_rule->path.nh.address.ip6, &in_rule->next_hop_ip.addr.ip6.sin6_addr.s6_addr, sizeof(vpp_rule->path.nh.address.ip6));
+        } else {
+            SAIVPP_WARN("Unknown protocol in next hop prefix");
+            // return -EINVAL;
+        }
+    }
+    mp->context = store_ptr(tunterm_index);
+
+    S (mp);
+
+    WR (ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+}
+
+
 static int vpp_acl_counters_enable_disable (bool enable)
 {
     vat_main_t *vam = &vat_main;
@@ -2131,6 +2441,50 @@ int sw_interface_set_mtu (const char *hwif_name, uint32_t mtu, int type)
     S (mp);
 
     W (ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+}
+
+int sw_interface_set_mac (const char *hwif_name, uint8_t *mac_address)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_sw_interface_set_mac_address_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = interface_msg_id_base;
+
+    M (SW_INTERFACE_SET_MAC_ADDRESS, mp);
+    
+    if (hwif_name) {
+        u32 idx;
+        idx = get_swif_idx(vam, hwif_name);
+        if (idx != (u32) -1) {
+            mp->sw_if_index = htonl(idx);
+        } else {
+            SAIVPP_ERROR("Unable to get sw_index for %s\n", hwif_name);
+            VPP_UNLOCK();
+            return -EINVAL;
+        }
+    } else {
+        SAIVPP_ERROR("hwif_name cannot be NULL");
+        VPP_UNLOCK();
+        return -EINVAL;
+    }
+    
+    if (mac_address == NULL) {
+        SAIVPP_ERROR("mac address can't be NULL");
+        VPP_UNLOCK();
+        return -EINVAL;
+    }
+    memcpy(mp->mac_address, mac_address, sizeof(mp->mac_address));
+
+    S (mp);
+
+    WR (ret);
 
     VPP_UNLOCK();
 
@@ -2658,33 +3012,12 @@ int l2fib_flush_bd(uint32_t bd_id)
     return ret;
 }
 
-static bool vpp_ip_addr_for_bfd(vl_api_address_t *vpp_addr, vpp_ip_addr_t *ipaddr)
-{
-    bool ret = true;
-    if (ipaddr->sa_family == AF_INET)
-    {
-        struct sockaddr_in *ip4 = &(ipaddr->addr.ip4);
-        vpp_addr->af = ADDRESS_IP4;
-        memcpy(&vpp_addr->un.ip4, &ip4->sin_addr.s_addr, sizeof(vpp_addr->un.ip4));
-    }
-    else if (ipaddr->sa_family == AF_INET6)
-    {
-        struct sockaddr_in6 *ip6 = &(ipaddr->addr.ip6);
-        vpp_addr->af = ADDRESS_IP6;
-        memcpy(&vpp_addr->un.ip6, &ip6->sin6_addr.s6_addr, sizeof(vpp_addr->un.ip6));
-    }
-    else
-    {
-        return false;
-    }
-    return ret;
-}
-
-int bfd_udp_add(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t *peer_addr, \
-                uint8_t detect_mult, uint32_t desired_min_tx, uint32_t required_min_rx )
+int bfd_udp_add(bool multihop, const char *hwif_name, vpp_ip_addr_t *local_addr,
+                vpp_ip_addr_t *peer_addr, uint8_t detect_mult,
+                uint32_t desired_min_tx, uint32_t required_min_rx)
 {
     vat_main_t *vam = &vat_main;
-    vl_api_bfd_udp_add_t* mp;
+    vl_api_bfd_udp_add_v2_t* mp;
 
     int ret;
 
@@ -2692,7 +3025,7 @@ int bfd_udp_add(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t 
 
     __plugin_msg_base = bfd_msg_id_base;
 
-    M (BFD_UDP_ADD, mp);
+    M (BFD_UDP_ADD_V2, mp);
 
     if (hwif_name)
     {
@@ -2710,7 +3043,7 @@ int bfd_udp_add(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t 
             return -EINVAL;
         }
     }
-    else
+    else if (!multihop)
     {
         VPP_UNLOCK();
         return -EINVAL;
@@ -2720,14 +3053,15 @@ int bfd_udp_add(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t 
     memset(&vpp_local_addr, 0, sizeof(vl_api_address_t));
     memset(&vpp_peer_addr, 0, sizeof(vl_api_address_t));
 
-    if(!((true == vpp_ip_addr_for_bfd(&vpp_local_addr, local_addr)) && \
-         (true == vpp_ip_addr_for_bfd(&vpp_peer_addr, peer_addr))))
+    if(!((true == vpp_to_vl_api_ip_addr(&vpp_local_addr, local_addr)) && \
+         (true == vpp_to_vl_api_ip_addr(&vpp_peer_addr, peer_addr))))
     {
         SAIVPP_WARN("Invalid IP address passed for vpp for bfd_add");
         VPP_UNLOCK();
         return -EINVAL;
     }
 
+    mp->multihop = multihop;
     mp->desired_min_tx = htonl(desired_min_tx);
     mp->required_min_rx = htonl(required_min_rx);
     mp->detect_mult = detect_mult;
@@ -2737,17 +3071,18 @@ int bfd_udp_add(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t 
 
     S (mp);
 
-    W (ret);
+    WR (ret);
 
     VPP_UNLOCK();
 
     return ret;
 }
 
-int bfd_udp_del(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t *peer_addr)
+int bfd_udp_del(bool multihop, const char *hwif_name, vpp_ip_addr_t *local_addr,
+                vpp_ip_addr_t *peer_addr)
 {
     vat_main_t *vam = &vat_main;
-    vl_api_bfd_udp_del_t* mp;
+    vl_api_bfd_udp_del_v2_t* mp;
 
     int ret;
 
@@ -2755,7 +3090,7 @@ int bfd_udp_del(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t 
 
     __plugin_msg_base = bfd_msg_id_base;
 
-    M (BFD_UDP_DEL, mp);
+    M (BFD_UDP_DEL_V2, mp);
 
     if (hwif_name)
     {
@@ -2773,7 +3108,7 @@ int bfd_udp_del(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t 
             return -EINVAL;
         }
     }
-    else
+    else if (!multihop)
     {
         VPP_UNLOCK();
         return -EINVAL;
@@ -2783,22 +3118,47 @@ int bfd_udp_del(const char *hwif_name, vpp_ip_addr_t *local_addr, vpp_ip_addr_t 
     memset(&vpp_local_addr, 0, sizeof(vl_api_address_t));
     memset(&vpp_peer_addr, 0, sizeof(vl_api_address_t));
 
-    if(!((true == vpp_ip_addr_for_bfd(&vpp_local_addr, local_addr)) && \
-         (true == vpp_ip_addr_for_bfd(&vpp_peer_addr, peer_addr))))
+    if(!((true == vpp_to_vl_api_ip_addr(&vpp_local_addr, local_addr)) && \
+         (true == vpp_to_vl_api_ip_addr(&vpp_peer_addr, peer_addr))))
     {
         SAIVPP_WARN("Invalid IP address passed for vpp for bfd_del");
         VPP_UNLOCK();
         return -EINVAL;
     }
 
+    mp->multihop = multihop;
     mp->local_addr = vpp_local_addr;
     mp->peer_addr = vpp_peer_addr;
 
     S (mp);
 
+    WR (ret);
+
+    VPP_UNLOCK();
+
+    return ret;
+}
+
+static int vpp_bfd_events_enable_disable (bool enable)
+{
+    vat_main_t *vam = &vat_main;
+    vl_api_want_bfd_events_v2_t *mp;
+    int ret;
+
+    VPP_LOCK();
+
+    __plugin_msg_base = bfd_msg_id_base;
+
+    M (WANT_BFD_EVENTS_V2, mp);
+    mp->enable_disable = enable;
+    mp->pid = htonl(getpid());
+
+    S (mp);
     W (ret);
 
     VPP_UNLOCK();
 
     return ret;
 }
+
+
