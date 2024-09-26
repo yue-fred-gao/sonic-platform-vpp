@@ -834,7 +834,9 @@ sai_status_t SwitchStateBase::AclTblConfig(
         for (uint32_t i = 0; i < p_ace->attrs_count; i++) {
             attr = &p_ace->attrs[i];
             if(attr->id == SAI_ACL_ENTRY_ATTR_FIELD_TUNNEL_TERMINATED) {
-                ttf_flag_set=true;
+                if(attr->value.aclfield.data.booldata == true) {
+                    ttf_flag_set=true;
+                }
                 break;
             }
         }
@@ -897,7 +899,9 @@ sai_status_t SwitchStateBase::AclTblConfig(
 	    }
 	    
         if(attr->id == SAI_ACL_ENTRY_ATTR_FIELD_TUNNEL_TERMINATED) {
-            update_tunterm_rule = true;
+            if(attr->value.aclfield.data.booldata == true) {
+                update_tunterm_rule = true;
+            }
         }
 
 	    if (attr->id == SAI_ACL_ENTRY_ATTR_FIELD_ACL_RANGE_TYPE && acl->count>0  && (rule<(&acl->rules[0]+n_entries))) {
