@@ -34,12 +34,12 @@ resources:
   repositories:
   - repository: sonic-platform-vpp
     type: github
-    name: sonic-net/sonic-platform-vpp
+    name: yue-fred-gao/sonic-platform-vpp
     ref: master
-    endpoint: sonic-net
+    endpoint: yue-fred-gao
 
 stages:
-- stage: build-vpp
+- stage: BuildVpp
   
   jobs:
   - job:
@@ -64,7 +64,6 @@ stages:
         make UNATTENDED=y PLATFORM=vpp install-deps install-ext-deps
         make UNATTENDED=y PLATFORM=vpp -j4 pkg-deb
         sudo dpkg -i build-root/*.deb
-      condition: eq('${{ parameters.buildVpp }}', true )
       displayName: "Build VPP packages from source"
 
 
