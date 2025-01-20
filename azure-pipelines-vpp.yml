@@ -1,0 +1,70 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger: none
+pool:
+  vmImage: ubuntu-latest
+
+schedules:
+- cron: "0 8 * * *"
+  displayName: Daily midnight build
+  branches:
+    include:
+    - master
+  always: true
+
+parameters:
+  - name: debian_version
+    type: string
+    default: bookworm
+  - name: arch
+    type: string
+    default: amd64
+   
+variables:
+  - name: BUILD_BRANCH
+    ${{ if eq(variables['Build.Reason'], 'PullRequest') }}:
+      value: $(System.PullRequest.TargetBranch)
+    ${{ else }}:
+      value: $(Build.SourceBranchName)
+    
+resources:
+  repositories:
+  - repository: sonic-platform-vpp
+    type: github
+    name: sonic-net/sonic-platform-vpp
+    ref: master
+    endpoint: sonic-net
+
+stages:
+- stage: build-vpp
+  
+  jobs:
+  - job:
+    displayName: amd64
+    timeoutInMinutes: 300
+    pool: 
+      name: default
+    container:
+      image: sonicdev-microsoft.azurecr.io:443/sonic-slave-${{ parameters.debian_version }}:latest
+      options:  "--privileged"
+    steps:
+    - checkout: self
+      clean: true
+    - script: |
+        set -ex
+        git clone https://github.com/sonic-net/sonic-platform-vpp.git
+        mkdir repo
+        git clone https://gerrit.fd.io/r/vpp repo
+        cp -vr sonic-platform-vpp/vppbld/plugins/* repo/src/packages
+        cd repo
+        git apply ../sonic-platform-vpp/vppbld/vpp.patch
+        make UNATTENDED=y PLATFORM=vpp install-deps install-ext-deps
+        make UNATTENDED=y PLATFORM=vpp -j4 pkg-deb
+        sudo dpkg -i build-root/*.deb
+      condition: eq('${{ parameters.buildVpp }}', true )
+      displayName: "Build VPP packages from source"
+
+
