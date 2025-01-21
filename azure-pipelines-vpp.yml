@@ -36,7 +36,7 @@ resources:
     type: github
     name: yue-fred-gao/sonic-platform-vpp
     ref: master
-    endpoint: yue-fred-gao
+    endpoint: "sonic-vpp CICD"
 
 stages:
 - stage: BuildVpp
