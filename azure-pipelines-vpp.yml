@@ -5,7 +5,7 @@
 
 trigger: none
 pool:
-  vmImage: ubuntu-latest
+  vmImage: ubuntu-20.04
 
 schedules:
 - cron: "0 8 * * *"
@@ -45,8 +45,6 @@ stages:
   - job:
     displayName: amd64
     timeoutInMinutes: 300
-    pool: 
-      name: default
     container:
       image: sonicdev-microsoft.azurecr.io:443/sonic-slave-${{ parameters.debian_version }}:latest
       options:  "--privileged"
