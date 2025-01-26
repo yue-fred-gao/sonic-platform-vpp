@@ -34,7 +34,7 @@ resources:
   repositories:
   - repository: sonic-platform-vpp
     type: github
-    name: yue-fred-gao/sonic-platform-vpp
+    name: sonic-net/sonic-platform-vpp
     ref: master
     endpoint: "sonic-vpp CICD"
 
