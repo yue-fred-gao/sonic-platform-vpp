@@ -85,6 +85,16 @@ function setup_ports_list()
         echo "VPP_WORKERS=$VPP_WORKERS" >> $VPP_ENV_FILE
     fi
 
+    if [ "x$VPP_DEFAULT_RX_MODE" != "x" ]; then
+        [[ "$VPP_DEFAULT_RX_MODE" =~ ^(polling|interrupt|adaptive)$ ]] || error "VPP_DEFAULT_RX_MODE must be polling, interrupt or adaptive, got '$VPP_DEFAULT_RX_MODE'"
+        echo "VPP_DEFAULT_RX_MODE=$VPP_DEFAULT_RX_MODE" >> $VPP_ENV_FILE
+    fi
+
+    if [ "x$VPP_L2FIB_BUCKETS" != "x" ]; then
+        [[ "$VPP_L2FIB_BUCKETS" =~ ^[1-9][0-9]*$ ]] && (( (VPP_L2FIB_BUCKETS & (VPP_L2FIB_BUCKETS - 1)) == 0 )) || error "VPP_L2FIB_BUCKETS must be a power of 2, got '$VPP_L2FIB_BUCKETS'"
+        echo "VPP_L2FIB_BUCKETS=$VPP_L2FIB_BUCKETS" >> $VPP_ENV_FILE
+    fi
+
     if [ "x$SONIC_VPP_SWITCH" != "x" ]; then
         echo "SONIC_VPP_SWITCH=$SONIC_VPP_SWITCH" >> $VPP_ENV_FILE
     fi    

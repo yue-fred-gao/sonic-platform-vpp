@@ -126,3 +126,11 @@
 #       (sflow_drop_policer_set API / "sflow drop-monitoring policer"); vpplib
 #       binds the VPP policer of the SONiC drop_monitor_limit SAI policer.
 0028-sflow-switch-wide-drop-monitoring-for-sonic.patch
+# 30. dpdk: make DPDK rx queues honour "interface { default-rx-mode }".
+#     The default is applied when a queue first gets interrupt support
+#     (first admin up), since the interrupt probe runs only then. On later
+#     starts the queue's eventfd file is reused instead of re-added
+#     (leaked one file per queue per admin up, EEXIST from epoll), and
+#     non-polling queues are re-armed after the probe masks queue 0.
+#     Ports without interrupt support stay polling.
+0030-dpdk-apply-default-rx-mode-and-keep-rx-interrupt-files-across-restart.patch

@@ -84,6 +84,20 @@ if [ "x$VPP_WORKERS" != "x" ]; then
     sed -i -E -e "s/^([[:space:]]*)workers[[:space:]]+[0-9]+/\1workers $VPP_WORKERS/" $TMP_FILE
 fi
 
+VPP_DEFAULT_RX_MODE=${VPP_DEFAULT_RX_MODE:-adaptive}
+[[ "$VPP_DEFAULT_RX_MODE" =~ ^(polling|interrupt|adaptive)$ ]] || \
+    error "VPP_DEFAULT_RX_MODE must be polling, interrupt or adaptive, got '$VPP_DEFAULT_RX_MODE'"
+# Anchored on the keyword so the placeholder's mention in the comment above
+# the stanza is left alone
+sed -i -e "s/default-rx-mode VPP_DEFAULT_RX_MODE/default-rx-mode $VPP_DEFAULT_RX_MODE/" $TMP_FILE
+
+VPP_L2FIB_BUCKETS=${VPP_L2FIB_BUCKETS:-16384}
+[[ "$VPP_L2FIB_BUCKETS" =~ ^[1-9][0-9]*$ ]] && (( (VPP_L2FIB_BUCKETS & (VPP_L2FIB_BUCKETS - 1)) == 0 )) || \
+    error "VPP_L2FIB_BUCKETS must be a power of 2, got '$VPP_L2FIB_BUCKETS'"
+echo "l2fib {" >> $TMP_FILE
+echo "    num-buckets $VPP_L2FIB_BUCKETS" >> $TMP_FILE
+echo "}" >> $TMP_FILE
+
 IDX=0
 upd_startup """dpdk {
 	dev default {

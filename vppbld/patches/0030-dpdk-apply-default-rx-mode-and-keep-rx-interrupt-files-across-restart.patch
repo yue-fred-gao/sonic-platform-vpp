@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yue Gao <yuega2@cisco.com>
+Date: Fri, 20 Nov 2026 17:30:00 -0500
+Subject: [PATCH] dpdk: apply default rx-mode and keep rx interrupt files
+ across restart
+
+dpdk_setup_interrupts runs on every dpdk_device_start, i.e. on every
+admin up and every device reconfiguration. Three problems follow:
+
+- DPDK rx queues register in polling mode and nothing applies the
+  interface's default rx-mode, so "interface { default-rx-mode }" has
+  no effect on DPDK ports. The mode can't be set from startup config
+  either, because interrupt support is only probed on the first admin
+  up.
+- Each start adds a new clib file for every rx queue's eventfd. The
+  fd is already in epoll, so epoll_ctl fails with EEXIST, the old file
+  stays registered, and the new one leaks.
+- The probe disables the queue 0 interrupt on maskable devices, which
+  leaves an adaptive or interrupt queue 0 masked after a restart.
+
+Reuse a queue's file when its eventfd is unchanged, and replace it when
+DPDK returns a new one. The eventfd belongs to DPDK, so the file is
+marked dont_close. Apply the interface default rx-mode when a queue
+first gets interrupt support, and re-enable the interrupt on later
+starts for queues that aren't polling.
+
+Type: fix
+
+---
+diff --git a/src/plugins/dpdk/device/common.c b/src/plugins/dpdk/device/common.c
+index 5731cfc42..9fcc112cb 100644
+--- a/src/plugins/dpdk/device/common.c
++++ b/src/plugins/dpdk/device/common.c
+@@ -369,6 +369,7 @@ dpdk_setup_interrupts (dpdk_device_t *xd)
+ {
+   vnet_main_t *vnm = vnet_get_main ();
+   vnet_hw_interface_t *hi = vnet_get_hw_interface (vnm, xd->hw_if_index);
++  uword *apply_default_mode = 0;
+   int int_mode = 0;
+   if (!hi)
+     return;
+@@ -397,24 +398,45 @@ dpdk_setup_interrupts (dpdk_device_t *xd)
+       for (int q = 0; q < xd->conf.n_rx_queues; q++)
+ 	{
+ 	  dpdk_rx_queue_t *rxq = vec_elt_at_index (xd->rx_queues, q);
++	  vnet_hw_if_rx_queue_t *hw_rxq =
++	    vnet_hw_if_get_rx_queue (vnm, rxq->queue_index);
+ 	  clib_file_t f = { 0 };
+-	  rxq->efd = rte_eth_dev_rx_intr_ctl_q_get_fd (xd->port_id, q);
+-	  if (rxq->efd < 0)
++	  int efd = rte_eth_dev_rx_intr_ctl_q_get_fd (xd->port_id, q);
++	  if (efd < 0)
+ 	    {
+ 	      xd->flags &= ~DPDK_DEVICE_FLAG_INT_SUPPORTED;
+ 	      int_mode = 0;
+ 	      break;
+ 	    }
++
++	  /* This runs on every admin up. Keep the queue's existing file if
++	   * the eventfd is unchanged: adding it again leaks a file entry and
++	   * fails in epoll_ctl with EEXIST. */
++	  if (hw_rxq->file_index != ~0)
++	    {
++	      if (rxq->efd == efd)
++		continue;
++	      clib_file_del_by_index (&file_main, rxq->clib_file_index);
++	    }
++	  else
++	    apply_default_mode = clib_bitmap_set (apply_default_mode, q, 1);
++
++	  rxq->efd = efd;
+ 	  f.read_function = dpdk_rx_read_ready;
+ 	  f.flags = UNIX_FILE_EVENT_EDGE_TRIGGERED;
+ 	  f.file_descriptor = rxq->efd;
++	  /* the eventfd is owned by DPDK */
++	  f.dont_close = 1;
+ 	  f.private_data = rxq->queue_index;
+ 	  f.description = format (0, "%U queue %u", format_dpdk_device_name,
+ 				  xd->device_index, q);
+ 	  rxq->clib_file_index = clib_file_add (&file_main, &f);
+ 	  vnet_hw_if_set_rx_queue_file_index (vnm, rxq->queue_index,
+ 					      rxq->clib_file_index);
+-	  if (xd->flags & DPDK_DEVICE_FLAG_INT_UNMASKABLE)
++	  /* Unmaskable devices are masked by leaving the fd out of epoll. A
++	   * replaced fd of a non-polling queue must stay in epoll. */
++	  if ((xd->flags & DPDK_DEVICE_FLAG_INT_UNMASKABLE) &&
++	      hw_rxq->mode == VNET_HW_IF_RX_MODE_POLLING)
+ 	    {
+ 	      clib_file_main_t *fm = &file_main;
+ 	      clib_file_t *f = clib_file_get (fm, rxq->clib_file_index);
+@@ -427,6 +449,29 @@ dpdk_setup_interrupts (dpdk_device_t *xd)
+     vnet_hw_if_set_caps (vnm, hi->hw_if_index, VNET_HW_IF_CAP_INT_MODE);
+   else
+     vnet_hw_if_unset_caps (vnm, hi->hw_if_index, VNET_HW_IF_CAP_INT_MODE);
++
++  if (int_mode)
++    for (int q = 0; q < xd->conf.n_rx_queues; q++)
++      {
++	dpdk_rx_queue_t *rxq = vec_elt_at_index (xd->rx_queues, q);
++	vnet_hw_if_rx_queue_t *hw_rxq =
++	  vnet_hw_if_get_rx_queue (vnm, rxq->queue_index);
++
++	/* DPDK queues register in polling mode. Apply the interface
++	 * default (startup.conf "interface { default-rx-mode }") once,
++	 * when the queue first gets interrupt support. */
++	if (clib_bitmap_get (apply_default_mode, q))
++	  vnet_hw_if_set_rx_queue_mode (vnm, rxq->queue_index,
++					VNET_HW_IF_RX_MODE_DEFAULT);
++	/* The probe above leaves queue 0 masked, and a restart may leave
++	 * other queues masked too. Re-arm queues that still need
++	 * interrupts. */
++	else if (hw_rxq->mode != VNET_HW_IF_RX_MODE_POLLING &&
++		 !(xd->flags & DPDK_DEVICE_FLAG_INT_UNMASKABLE))
++	  rte_eth_dev_rx_intr_enable (xd->port_id, q);
++      }
++
++  clib_bitmap_free (apply_default_mode);
+   vnet_hw_if_update_runtime_data (vnm, xd->hw_if_index);
+ }
+ 
+-- 
+2.43.0
+

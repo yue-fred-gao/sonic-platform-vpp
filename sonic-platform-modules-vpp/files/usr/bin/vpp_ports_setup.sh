@@ -13,8 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-UIO_DRV=${UIO_DRV:=uio_pci_generic}
-
 function bind_ports_to_uio()
 {
     portlist=$1
@@ -38,7 +36,7 @@ function bind_ports_to_uio()
 	CUR_DRIVER=$(lspci -k -s $PCI_ID | grep "Kernel driver in use:" | cut -d ':' -f2 | xargs)
 	# Only skip mlx5_core devices as they need their native driver
 	if [ "$CUR_DRIVER" == "mlx5_core" ]; then
-			echo "Skipping device with mlx5_core driver: $pci_dev"
+			echo "Skipping device with mlx5_core driver: $PCI_ID"
 			continue
 	fi
 
@@ -54,12 +52,14 @@ function bind_ports_to_uio()
 	        attempt=$((attempt + 1))
 	        if [ "$attempt" -ge "$max_attempts" ]; then
 	            echo "Timeout: Device unbind operation took too long"
+	            break
 	        fi
 	    done
 	fi
 	echo "Binding port $port($PCI_ID) to driver $UIO_DRV"
 	NEWID=$(lspci -s $PCI_ID -n | awk '{ print $3}' | awk -F":" '{ printf "%s %s", $1, $2}')
-	echo "$NEWID" > /sys/bus/pci/drivers/$UIO_DRV/new_id
+	# EEXIST once an earlier port with the same vendor/device id registered it
+	echo "$NEWID" 2>/dev/null > /sys/bus/pci/drivers/$UIO_DRV/new_id || true
 	echo "$PCI_ID" > /sys/bus/pci/drivers/$UIO_DRV/bind
     done
 }
@@ -91,6 +91,17 @@ VPP_ROOT_CFG=/etc/sonic/vpp
 VPP_ENV_FILE=$VPP_ROOT_CFG/syncd_vpp_env
 
 source $VPP_ENV_FILE
+
+# UIO_DRV from syncd_vpp_env wins. Otherwise use vfio-pci when an IOMMU is
+# present: it gives each rx queue its own interrupt vector, which DPDK needs
+# for interrupt/adaptive rx-mode. uio_pci_generic has a single vector.
+if [ "x$UIO_DRV" == "x" ]; then
+    if [ -n "$(ls -A /sys/kernel/iommu_groups 2>/dev/null)" ]; then
+	UIO_DRV=vfio-pci
+    else
+	UIO_DRV=uio_pci_generic
+    fi
+fi
 
 IFS=","
 read -a portlist <<< "$VPP_DPDK_PORTS"

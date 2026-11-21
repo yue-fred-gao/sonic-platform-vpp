@@ -82,6 +82,20 @@ ip6 {
 	heap-size 128M
 }
 
+## Initial rx-mode of the rx queues of newly created interfaces: polling,
+## interrupt or adaptive.  Honoured by tap (the linux-cp host interfaces),
+## virtio and memif, and by dpdk ports once their first admin up finds rx
+## interrupt support (needs vfio-pci).  dpdk ports without it keep polling,
+## and af_packet queues start in interrupt mode regardless of this setting.
+## A worker only sleeps when none of its queues is polling.
+##
+## VPP_DEFAULT_RX_MODE below is a placeholder: vpp_init.sh replaces it with
+## the value of VPP_DEFAULT_RX_MODE from /etc/sonic/vpp/syncd_vpp_env, or with
+## adaptive when that is unset.  Set it to polling to busy-poll every queue.
+interface {
+	default-rx-mode VPP_DEFAULT_RX_MODE
+}
+
 cpu {
 	## In the VPP there is one main thread and optionally the user can create worker(s)
 	## The main thread and worker thread(s) can be pinned to CPU core(s) manually or automatically
@@ -321,6 +335,10 @@ plugins {
 # }
 
 ## L2 FIB
+## vpp_init.sh appends "l2fib { num-buckets $VPP_L2FIB_BUCKETS }", 16384 when
+## unset.  While saivpp is subscribed to MAC events the l2fib scanner walks
+## every bucket each 100 ms on vpp_main, so the VPP default of 262144 buckets
+## keeps vpp_main busy.
 # l2fib {
     ## l2fib hash table size.
     #  table-size 512M
