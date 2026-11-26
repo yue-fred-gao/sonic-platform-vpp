@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Yue Gao <yuega2@cisco.com>
+Date: Mon, 23 Nov 2026 17:30:00 -0500
+Subject: [PATCH] vlib: wake sleeping workers in vlib_worker_wait_one_loop
+
+vlib_worker_wait_one_loop() spins until every worker has been once
+around its main loop, but never wakes them. A worker with no polling
+input node sleeps in epoll for up to 10 ms, so the main thread spins
+until the timeout expires. FIB calls it on every route uninstall, so
+with interrupt or adaptive rx-mode each route delete costs up to 10 ms
+(~100 deletes/s), while adds are unaffected.
+
+Wake each worker while waiting for it. vlib_thread_wakeup() only writes
+the eventfd when the worker has announced it is sleeping, so calling it
+inside the spin also covers a worker that goes to sleep after the wait
+starts.
+
+Type: fix
+
+diff --git a/src/vlib/threads.c b/src/vlib/threads.c
+index c7ed41bd6..dc1244514 100644
+--- a/src/vlib/threads.c
++++ b/src/vlib/threads.c
+@@ -1618,6 +1618,9 @@ vlib_worker_wait_one_loop (void)
+ 	   * so at least one worker cannot make any progress */
+ 	  if (vlib_worker_threads->wait_before_barrier)
+ 	    break;
++	  /* a worker sleeping in epoll would otherwise only come round
++	   * when its timeout expires */
++	  vlib_thread_wakeup (ii);
+ 	  CLIB_PAUSE ();
+ 	}
+     }

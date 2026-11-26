@@ -84,9 +84,9 @@ ip6 {
 
 ## Initial rx-mode of the rx queues of newly created interfaces: polling,
 ## interrupt or adaptive.  Honoured by tap (the linux-cp host interfaces),
-## virtio and memif, and by dpdk ports once their first admin up finds rx
-## interrupt support (needs vfio-pci).  dpdk ports without it keep polling,
-## and af_packet queues start in interrupt mode regardless of this setting.
+## virtio, memif and dpdk.  A dpdk port falls back to polling at its first
+## admin up if it has no rx interrupt support (needs vfio-pci), and
+## af_packet queues start in interrupt mode regardless of this setting.
 ## A worker only sleeps when none of its queues is polling.
 ##
 ## VPP_DEFAULT_RX_MODE below is a placeholder: vpp_init.sh replaces it with

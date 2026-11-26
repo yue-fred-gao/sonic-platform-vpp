@@ -127,10 +127,18 @@
 #       binds the VPP policer of the SONiC drop_monitor_limit SAI policer.
 0028-sflow-switch-wide-drop-monitoring-for-sonic.patch
 # 30. dpdk: make DPDK rx queues honour "interface { default-rx-mode }".
-#     The default is applied when a queue first gets interrupt support
-#     (first admin up), since the interrupt probe runs only then. On later
-#     starts the queue's eventfd file is reused instead of re-added
-#     (leaked one file per queue per admin up, EEXIST from epoll), and
-#     non-polling queues are re-armed after the probe masks queue 0.
-#     Ports without interrupt support stay polling.
+#     Queues take the default when registered, so ports that are never
+#     admin up don't keep dpdk-input polling; while a port is down a mode
+#     change is only recorded. On start, a port whose interrupt probe fails
+#     falls back to polling, and otherwise each queue's interrupt is synced
+#     with its mode (the probe masks queue 0). The queue's eventfd file is
+#     reused instead of re-added on every start (leaked one file per queue
+#     per admin up, EEXIST from epoll).
 0030-dpdk-apply-default-rx-mode-and-keep-rx-interrupt-files-across-restart.patch
+#
+# 31. vlib: wake sleeping workers in vlib_worker_wait_one_loop
+#     FIB waits for every worker to go once round its loop on each route
+#     uninstall, but never woke them, so with interrupt or adaptive
+#     rx-mode an idle worker held each route delete for up to its 10 ms
+#     epoll timeout.
+0031-vlib-wake-sleeping-workers-in-vlib_worker_wait_one_loop.patch
